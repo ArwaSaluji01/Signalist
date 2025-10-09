@@ -6,13 +6,19 @@ import {headers} from "next/headers";
 
 export const signUpWithEmail = async ({ email, password, fullName, country, investmentGoals, riskTolerance, preferredIndustry }: SignUpFormData) => {
     try {
-        const response = await auth.api.signUpEmail({ body: { email, password, name: fullName } })
+        // Pass Next.js headers so BetterAuth can set cookies on the response
+        const response = await auth.api.signUpEmail({ body: { email, password, name: fullName }, headers: await headers() })
 
-        if(response) {
-            await inngest.send({
-                name: 'app/user.created',
-                data: { email, name: fullName, country, investmentGoals, riskTolerance, preferredIndustry }
-            })
+        if (response) {
+            try {
+                await inngest.send({
+                    name: 'app/user.created',
+                    data: { email, name: fullName, country, investmentGoals, riskTolerance, preferredIndustry }
+                })
+            } catch (e) {
+                // Inngest failures should not block a successful sign-up. Log and continue.
+                console.warn('Warning: failed to send inngest event for user.created', e)
+            }
         }
 
         return { success: true, data: response }
@@ -24,7 +30,16 @@ export const signUpWithEmail = async ({ email, password, fullName, country, inve
 
 export const signInWithEmail = async ({ email, password }: SignInFormData) => {
     try {
-        const response = await auth.api.signInEmail({ body: { email, password } })
+        // Pass Next.js headers so BetterAuth can set auth cookies on successful sign-in
+        const response = await auth.api.signInEmail({ body: { email, password }, headers: await headers() })
+
+        // BetterAuth may return an object describing an error. Check and return a structured result.
+        if (!response || (typeof response === 'object' && 'error' in (response as Record<string, unknown>) && (response as Record<string, unknown>).error)) {
+            console.log('Sign in response indicates failure', response)
+            const resp = response as Record<string, unknown> | null;
+            const errMsg = resp && typeof resp.error === 'string' ? resp.error : 'Sign in failed';
+            return { success: false, error: errMsg }
+        }
 
         return { success: true, data: response }
     } catch (e) {
